@@ -1,0 +1,262 @@
+Act as a senior DevOps architect specializing in Terraform, Azure, and RKE2 Kubernetes.
+
+Generate a **complete, production-grade Terraform project** to deploy an RKE2 cluster on Azure VMs.
+
+---
+
+# 🚨 HARD REQUIREMENTS (FAIL IF MISSED)
+
+The solution is INVALID if any of the following are missing:
+
+* providers.tf
+* versions.tf
+* backend.tf
+* main.tf
+* variables.tf
+* outputs.tf
+* Separate modules for master and worker nodes
+
+---
+
+# 1. Provider & Backend
+
+Create:
+
+### providers.tf
+
+* azurerm provider with `features {}`
+* No inline providers
+
+### versions.tf
+
+* Terraform version constraint
+* azurerm provider version pinned
+
+### backend.tf
+
+* Azure remote backend (azurerm)
+* Include:
+
+  * resource_group_name
+  * storage_account_name
+  * container_name
+  * key
+
+---
+
+# 2. Modules (STRICT — DO NOT MERGE)
+
+modules/
+
+* resource_group/
+* network/
+* nsg/
+* public_ip/
+* nic/
+* master/        ← MUST be separate
+* worker/        ← MUST be separate
+* storage/
+
+🚨 IMPORTANT:
+
+* DO NOT create a single compute module
+* master and worker MUST be अलग modules
+* Their logic MUST NOT be mixed
+
+Each module must contain:
+
+* main.tf
+* variables.tf
+* outputs.tf
+
+---
+
+# 3. Environments
+
+environments/
+
+* dev/
+* test/
+
+Each environment:
+
+* Uses same root module
+* Has its own terraform.tfvars
+* No duplicated logic
+
+---
+
+# 4. Architecture
+
+Per environment:
+
+* Resource Group (module)
+* VNet + Subnet (network module)
+* NSG (separate module)
+* Public IP (for master)
+* NICs (module)
+* Master VMs (master module)
+* Worker VMs (worker module)
+
+---
+
+# 5. Compute Design (VERY IMPORTANT)
+
+### Master Module:
+
+* Supports configurable master count (default = 1)
+* Uses `for_each`
+* Handles:
+
+  * RKE2 server install
+  * cluster init
+
+### Worker Module:
+
+* Supports configurable worker count (default = 2)
+* Uses `for_each`
+* Handles:
+
+  * join cluster logic
+
+🚨 MUST:
+
+* Use map/object input (NOT count)
+* Ensure scaling does NOT break Terraform state
+* Allow future customization (VM size, zones, etc.)
+
+---
+
+# 6. Automation
+
+Everything must be automated:
+
+* VM provisioning
+* RKE2 installation
+* Cluster bootstrap
+* Worker join
+
+Use:
+
+* cloud-init OR Custom Script Extension
+
+---
+
+# 7. Scripts (MANDATORY)
+
+scripts/
+
+* master.sh
+* worker.sh
+
+### master.sh:
+
+* Install RKE2 server
+* Disable default CNI
+* Enable Calico
+* Start rke2-server
+* Wait until API is ready
+* Output node-token
+
+### worker.sh:
+
+* Install RKE2 agent
+* Fetch token dynamically
+* Retry until master is ready
+* Join cluster
+
+Scripts must:
+
+* Be idempotent
+* Handle retries
+* Handle timing dependencies
+
+---
+
+# 8. Networking
+
+* Private IP communication
+* No hardcoded IPs
+* Pass master private IP dynamically
+
+---
+
+# 9. Variables
+
+* location
+* environment
+* vm_size
+* master_nodes (map)
+* worker_nodes (map)
+* ssh_public_key
+
+---
+
+# 10. Outputs
+
+* master_public_ip
+* worker_private_ips
+* ssh command
+* kubeconfig instructions
+
+---
+
+# 11. Folder Structure (STRICT)
+
+.
+├── environments/
+├── modules/
+│   ├── master/
+│   ├── worker/
+├── scripts/
+├── providers.tf
+├── versions.tf
+├── backend.tf
+├── main.tf
+├── variables.tf
+├── outputs.tf
+
+---
+
+# 12. Best Practices
+
+* Tags everywhere
+* No hardcoding
+* Idempotent
+* Clean naming
+
+---
+
+# 13. Deliverables
+
+Provide:
+
+1. Full folder structure
+2. All modules (fully implemented)
+3. Root Terraform files
+4. scripts/master.sh
+5. scripts/worker.sh
+6. dev & test tfvars
+7. Deployment steps
+8. Explanation of decisions
+
+---
+
+# 14. Constraints
+
+* DO NOT merge master & worker modules
+* DO NOT skip any module
+* DO NOT simplify
+* Must be production-usable
+* Must support scaling
+
+---
+
+# FINAL VALIDATION
+
+Before finishing, verify:
+
+* Master module exists separately
+* Worker module exists separately
+* No shared compute module
+* All required files are present

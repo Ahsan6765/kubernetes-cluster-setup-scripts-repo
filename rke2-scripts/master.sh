@@ -1,3 +1,4 @@
+
 #!/bin/bash
 # ==============================
 # Robust RKE2 Master Node Setup Script
@@ -15,7 +16,7 @@ swapoff -a
 sed -i '/ swap / s/^/#/' /etc/fstab || true
 
 echo "Installing dependencies..."
-apt-get install -y curl wget apt-transport-https software-properties-common
+apt-get install -y curl wget apt-transport-https software-properties-common python3
 
 echo "Installing containerd..."
 apt-get install -y containerd
@@ -41,6 +42,11 @@ sysctl --system
 echo "Installing RKE2 server..."
 curl -sfL https://get.rke2.io | sh -
 
+mkdir -p /etc/rancher/rke2
+cat > /etc/rancher/rke2/config.yaml <<EOF
+token: ${NODE_TOKEN}
+EOF
+
 echo "Enabling and starting RKE2 server..."
 systemctl enable rke2-server
 systemctl start rke2-server
@@ -58,11 +64,19 @@ if [ ! -f "$token_file" ]; then
 fi
 
 # Export kubeconfig for the current user (supports running as root or non-root)
-KUBECONFIG_PATH="${HOME:-/root}/.kube/config"
+KUBECONFIG_PATH="$${HOME:-/root}/.kube/config"
 mkdir -p "$(dirname "$KUBECONFIG_PATH")"
 cp -f /etc/rancher/rke2/rke2.yaml "$KUBECONFIG_PATH"
 chown "$(id -u):$(id -g)" "$KUBECONFIG_PATH" || true
 export KUBECONFIG="$KUBECONFIG_PATH"
+
+# Also configure kubeconfig for the default Azure VM user so `kubectl` works on login
+AZUREUSER_HOME="/home/azureuser"
+if id azureuser >/dev/null 2>&1 && [ -d "$AZUREUSER_HOME" ]; then
+  mkdir -p "$AZUREUSER_HOME/.kube"
+  cp -f /etc/rancher/rke2/rke2.yaml "$AZUREUSER_HOME/.kube/config"
+  chown -R azureuser:azureuser "$AZUREUSER_HOME/.kube" || true
+fi
 
 # Ensure kubectl exists. Prefer RKE2-provided kubectl, otherwise symlink it.
 if command -v kubectl >/dev/null 2>&1; then
@@ -76,28 +90,25 @@ else
     echo "No kubectl found. Fetching kubectl client (stable)..."
     # Get latest stable version string
     K8S_VER="$(curl -sSL https://dl.k8s.io/release/stable.txt)"
-    curl -LO "https://dl.k8s.io/release/${K8S_VER}/bin/linux/amd64/kubectl"
+    curl -LO "https://dl.k8s.io/release/$K8S_VER/bin/linux/amd64/kubectl"
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
     rm -f kubectl
   fi
 fi
 
 # Wait for API server to respond via kubectl
-echo "Waiting for Kubernetes API server to be ready (timeout ${MASTER_WAIT_TIMEOUT}s)..."
+echo "Waiting for Kubernetes API server to be ready (timeout $${MASTER_WAIT_TIMEOUT}s)..."
 elapsed=0
 until kubectl get nodes >/dev/null 2>&1; do
   sleep "$SLEEP_INTERVAL"
   elapsed=$((elapsed + SLEEP_INTERVAL))
   if [ $elapsed -ge $MASTER_WAIT_TIMEOUT ]; then
-    echo "ERROR: timed out waiting for API server (after ${MASTER_WAIT_TIMEOUT}s)."
+    echo "ERROR: timed out waiting for API server (after $${MASTER_WAIT_TIMEOUT}s)."
     echo "journalctl -u rke2-server -n 200 --no-pager"
     exit 1
   fi
 done
 echo "Kubernetes API is reachable."
-
-echo "Master setup complete. Worker token (for joining nodes):"
-cat "$token_file" || true
 
 echo "Applying Calico CNI manifest..."
 # Use the recommended Calico manifest URL (this one should work offline if you adjust)
